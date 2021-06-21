@@ -1,0 +1,14 @@
+test:
+  WaitSpawn: "120:4:96" #地图为 房间名&loadworld
+  StartSpawn: "119:4:85"
+  WaitTime: 3
+  GameTime: 100
+  MinPlayer: 1
+  LoadWorld: scene01
+test2:
+  WaitSpawn: "120:4:96" #地图为 房间名&loadworld
+  StartSpawn: "119:4:85"
+  WaitTime: 3
+  GameTime: 100
+  MinPlayer: 1
+  LoadWorld: scene01
