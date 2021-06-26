@@ -13,13 +13,13 @@ import gameapi.room.Room;
 import gameapi.room.RoomStatus;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class MainClass extends PluginBase implements Listener {
 
     public static List<Room> roomListHashMap = new ArrayList<>();
-    public static HashMap<String, List<gameapi.effect.Effect>> effectHashMap = new HashMap<>();
+    public static ConcurrentHashMap<String, List<Effect>> effectHashMap = new ConcurrentHashMap<>();
     public static String path = null;
 
     @Override
@@ -38,7 +38,7 @@ public class MainClass extends PluginBase implements Listener {
         this.getLogger().info("您安装的本插件不需要收费购买，作者minebbs昵称:Glorydark！");
         this.getServer().getPluginManager().registerEvents(this,this);
         this.getServer().getPluginManager().registerEvents(new Event(),this);
-        this.getServer().getCommandMap().register("暴走英雄",new Command("drh"));
+        this.getServer().getCommandMap().register("暴走英雄",new GameCommand("drh"));
         path = getDataFolder().getPath();
         this.saveResource("blockaddons.yml",false);
         this.saveResource("rooms.yml",false);
@@ -61,7 +61,7 @@ public class MainClass extends PluginBase implements Listener {
 
     public void loadBlockAddons(){
         Config config = new Config(this.getDataFolder()+"/blockaddons.yml",Config.YAML);
-        effectHashMap = new HashMap<>();
+        effectHashMap = new ConcurrentHashMap<>();
         for(String string: config.getKeys(false)){
             this.getLogger().info("正在加载方块"+string+"的拓展数据");
             String[] idSplit = string.split(":");
