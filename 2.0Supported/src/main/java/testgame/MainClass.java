@@ -1,0 +1,169 @@
+package testgame;
+
+import cn.nukkit.Server;
+import cn.nukkit.block.Block;
+import cn.nukkit.event.Listener;
+import cn.nukkit.level.Position;
+import cn.nukkit.plugin.PluginBase;
+import cn.nukkit.utils.Config;
+import gameapi.arena.Arena;
+import gameapi.effect.Effect;
+import gameapi.room.RoomRule;
+import gameapi.room.Room;
+import gameapi.room.RoomStatus;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+
+public class MainClass extends PluginBase implements Listener {
+
+    public static List<Room> roomListHashMap = new ArrayList<>();
+    public static ConcurrentHashMap<String, List<Effect>> effectHashMap = new ConcurrentHashMap<>();
+    public static String path = null;
+
+    @Override
+    public void onLoad() {
+        super.onLoad();
+    }
+
+    @Override
+    public void onDisable() {
+        super.onDisable();
+    }
+
+    @Override
+    public void onEnable() {
+        this.getLogger().info("欢迎使用本插件【RecknessHero】");
+        this.getLogger().info("您安装的本插件不需要收费购买，作者minebbs昵称:Glorydark！");
+        this.getServer().getPluginManager().registerEvents(this,this);
+        this.getServer().getPluginManager().registerEvents(new Event(),this);
+        this.getServer().getCommandMap().register("暴走英雄",new GameCommand("drh"));
+        path = getDataFolder().getPath();
+        this.saveResource("blockaddons.yml",false);
+        this.saveResource("rooms.yml",false);
+        this.loadRooms();
+        this.loadBlockAddons();
+        super.onEnable();
+    }
+
+    public static List<gameapi.effect.Effect> getBlockAddonsInit(Block block){
+        int blockid = block.getId();
+        int blockmeta = block.getDamage();
+        String s = blockid+":"+blockmeta;
+        for(String string:effectHashMap.keySet()){
+            if(s.equals(string)){
+                return effectHashMap.get(string);
+            }
+        }
+        return null;
+    }
+
+    public void loadBlockAddons(){
+        Config config = new Config(this.getDataFolder()+"/blockaddons.yml",Config.YAML);
+        effectHashMap = new ConcurrentHashMap<>();
+        for(String string: config.getKeys(false)){
+            this.getLogger().info("正在加载方块"+string+"的拓展数据");
+            String[] idSplit = string.split(":");
+            for(Room room:roomListHashMap){
+                room.getRoomRule().canBreakBlocks.add(Integer.valueOf(idSplit[0]));
+                this.getLogger().info("方块"+idSplit[0]+"已被允许在游戏中破坏");
+            }
+            List<Effect> effectList = new ArrayList<>();
+            for(String effectStr: config.getStringList(string+".effects")) {
+                String[] effectSplit = effectStr.split(":");
+                if(effectSplit.length == 3) {
+                   gameapi.effect.Effect effect = new gameapi.effect.Effect(Integer.parseInt(effectSplit[0]),Integer.parseInt(effectSplit[1]),Integer.parseInt(effectSplit[2]));
+                    effectList.add(effect);
+                }
+            }
+            effectHashMap.put(string,effectList);
+        }
+        this.getLogger().info("方块拓展加载成功！");
+    }
+
+    public void loadRooms(){
+        Config config = new Config(this.getDataFolder()+"/rooms.yml",Config.YAML);
+        if(config.getKeys() != null){
+            for(String s:config.getKeys(false)){
+                RoomRule defaultRoomRule = new RoomRule(0,true,0);
+                defaultRoomRule.canBreakBlocks.add(100);
+                defaultRoomRule.canBreakBlocks.add(152);
+                defaultRoomRule.canPlaceBlocks.add(152);
+                Room room = new Room(defaultRoomRule,1);
+                if(config.exists(s+".LoadWorld")){
+                    this.getLogger().info("正在准备世界，房间:"+s);
+                    Arena.copyWorldAndLoad(s + "&worldload",config.getString(s + ".LoadWorld"));
+                    if (Server.getInstance().getLevelByName(config.getString(s + ".LoadWorld")) == null) {
+                        if (Server.getInstance().isLevelLoaded(s + "&worldload")) {
+                            Server.getInstance().getLevelByName(s + "&worldload").setAutoSave(false);
+                        } else {
+                            this.getLogger().info("房间【" + s + "】加载失败,请检查加载地图是否存在！");
+                            return;
+                        }
+                    } else {
+                        this.getLogger().info("房间【" + s + "】加载失败,请检查地图是否存在！");
+                        return;
+                    }
+                }else{
+                    this.getLogger().info("房间【"+s+"】加载失败,请检查地图备份是否存在！");
+                    return;
+                }
+
+                if(config.exists(s+".WaitSpawn")){
+                    String[] strings = config.getString(s+".WaitSpawn").split(":");
+                    if(strings.length != 3){ this.getLogger().info("房间【"+s+"】加载失败,请检查出生地配置！");return;}
+                    room.setWaitLocation(new Position(Double.parseDouble(strings[0]),Double.parseDouble(strings[1]),Double.parseDouble(strings[2]), Server.getInstance().getLevelByName(s+ "&worldload")).getLocation());
+                }else{
+                    this.getLogger().info("房间【"+s+"】加载失败,请检查等待点配置！");
+                    return;
+                }
+
+                if(config.exists(s+".StartSpawn")){
+                    String[] strings = config.getString(s+".StartSpawn").split(":");
+                    if(strings.length != 3){ this.getLogger().info("房间【"+s+"】加载失败,请检查出生地配置！");return;}
+                    room.setStartLocation(new Position(Double.parseDouble(strings[0]),Double.parseDouble(strings[1]),Double.parseDouble(strings[2]), Server.getInstance().getLevelByName(s+ "&worldload")).getLocation());
+                }else{
+                    this.getLogger().info("房间【"+s+"】加载失败,请检查出生地配置！");
+                    return;
+                }
+
+                if(config.exists(s+".WaitTime")){
+                    room.setWaitTime(config.getInt(s+".WaitTime"));
+                }else{
+                    this.getLogger().info("房间【"+s+"】加载失败,请检查等待时间配置！");
+                    return;
+                }
+
+                if(config.exists(s+".GameTime")){
+                    room.setRoundGameTime(config.getInt(s+".GameTime"));
+                }else{
+                    this.getLogger().info("房间【"+s+"】加载失败,请检查游戏时间配置！");
+                    return;
+                }
+
+                if(config.exists(s+".MinPlayer")){
+                    room.setMinPlayer(config.getInt(s+".MinPlayer",1));
+                }else{
+                    this.getLogger().info("房间【"+s+"】加载失败,请检查游戏时间配置！");
+                    return;
+                }
+
+                if(config.exists(s+".MaxPlayer")){
+                    room.setMinPlayer(config.getInt(s+".MaxPlayer",1));
+                }else{
+                    this.getLogger().info("房间【"+s+"】加载失败,请检查游戏时间配置！");
+                    return;
+                }
+                Event.roomFinishPlayers.put(room,new ArrayList<>());
+                room.load();
+                roomListHashMap.add(room);
+                Event.placeBlocks.put(room,new ArrayList<>());
+                Event.breakBlocks.put(room,new ArrayList<>());
+                room.setRoomStatus(RoomStatus.ROOM_STATUS_WAIT);
+                room.setName(s);
+                this.getLogger().info("房间【"+s+"】加载成功！");
+            }
+        }
+    }
+}
