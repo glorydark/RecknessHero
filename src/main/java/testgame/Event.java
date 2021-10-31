@@ -6,78 +6,86 @@ import cn.nukkit.block.Block;
 import cn.nukkit.event.EventHandler;
 import cn.nukkit.event.Listener;
 import cn.nukkit.event.block.BlockBreakEvent;
-import cn.nukkit.event.block.BlockPlaceEvent;
 import cn.nukkit.event.player.*;
 import cn.nukkit.form.response.FormResponseSimple;
 import cn.nukkit.form.window.FormWindowSimple;
-import cn.nukkit.inventory.PlayerInventory;
 import cn.nukkit.item.Item;
 import cn.nukkit.item.ItemBookEnchanted;
-import cn.nukkit.item.ItemPickaxeDiamond;
-import cn.nukkit.level.Level;
 import cn.nukkit.level.Location;
 import cn.nukkit.level.Position;
-import cn.nukkit.math.Vector3;
 import cn.nukkit.scheduler.Task;
 import cn.nukkit.utils.Config;
 import cn.nukkit.utils.TextFormat;
 import gameapi.effect.Effect;
 import gameapi.event.*;
-import gameapi.inventory.Inventory;
 import gameapi.room.Room;
 import gameapi.room.RoomStatus;
+import gameapi.scoreboard.UIScoreboard;
 import gameapi.sound.Sound;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class Event implements Listener {
-    public static ConcurrentHashMap<Room, List<Player>> roomFinishPlayers = new ConcurrentHashMap<>();
+    public static HashMap<Room, List<Player>> roomFinishPlayers = new HashMap<>();
     public static ConcurrentHashMap<Player, FormWindowSimple> playerFormWindowSimpleHashMap = new ConcurrentHashMap<>();
-    public static ConcurrentHashMap<Room, List<Block>> breakBlocks = new ConcurrentHashMap<>();
-    public static ConcurrentHashMap<Room, List<Block>> placeBlocks = new ConcurrentHashMap<>();
 
     @EventHandler
     public void touch(PlayerInteractEvent event){
         Room room = Room.getRoom(event.getPlayer());
         if(room == null){ return; }
         if(event.getItem() instanceof ItemBookEnchanted && event.getItem().getCustomName().equals(TextFormat.BOLD+"退出房间")){
-            room.players.remove(event.getPlayer());
+            room.removePlayer(event.getPlayer(),true);
             Position spawn = Server.getInstance().getDefaultLevel().getSafeSpawn();
             event.getPlayer().sendMessage("您已退出房间！");
-            Inventory.loadBag(event.getPlayer());
             event.getPlayer().teleportImmediate(new Location(spawn.x,spawn.y,spawn.z,spawn.level));
             return;
         }
-        if(event.getBlock().getId() == Block.EMERALD_BLOCK && room.roomStatus == RoomStatus.ROOM_STATUS_GameStart) {
+        if(event.getBlock().getId() == Block.EMERALD_BLOCK && room.getRoomStatus() == RoomStatus.ROOM_STATUS_GameStart) {
             if (!roomFinishPlayers.get(room).contains(event.getPlayer())) {
                 roomFinishPlayers.get(room).add(event.getPlayer());
+                int lastSec = room.getGameTime() - room.getTime();
+                UIScoreboard.drawScoreBoardEntry(event.getPlayer(),MainClass.getScoreboardSetting("scoreboard_objective_name"),MainClass.getScoreboardSetting("scoreboard_display_name"),MainClass.getScoreboardSetting("rank_format").replace("%rank%", String.valueOf(roomFinishPlayers.get(room).indexOf(event.getPlayer())+1)),MainClass.getScoreboardSetting("time_format").replace("%time%",UIScoreboard.secToTime(lastSec)));
+                if (room.getTime() < room.getGameTime() - 15) {
+                    room.setTime(room.getGameTime() - 15);
+                }
+                for (Player p : room.getPlayers()) {
+                    p.sendMessage(TextFormat.LIGHT_PURPLE+"%s 到达终点！".replace("%s", event.getPlayer().getName()));
+                }
+                /*
                 switch (roomFinishPlayers.get(room).size()){
                     case 1:
-                        if (room.time < room.gameTime - 15) {
-                            room.time = room.gameTime - 15;
-                            for (Player p : room.players) {
+                        if (room.getTime() < room.getGameTime() - 15) {
+                            room.setTime(room.getGameTime() - 15);
+                            for (Player p : room.getPlayers()) {
                                 p.sendMessage("%s 玩家获得冠军！".replace("%s", event.getPlayer().getName()));
+                                UIScoreboard.drawScoreBoardEntry(p,MainClass.getScoreboardSetting("scoreboard_objective_name"),MainClass.getScoreboardSetting("scoreboard_display_name"),"\uE176 Rank: 1st");
                             }
                         }
                         break;
                     case 2:
-                        for (Player p : room.players) {
+                        for (Player p : room.getPlayers()) {
                             p.sendMessage("%s 玩家获得亚军！".replace("%s", event.getPlayer().getName()));
+                            UIScoreboard.drawScoreBoardEntry(p,MainClass.getScoreboardSetting("scoreboard_objective_name"),MainClass.getScoreboardSetting("scoreboard_display_name"),"\uE176 Rank: 2nd");
                         }
                         break;
                     case 3:
-                        for (Player p : room.players) {
+                        for (Player p : room.getPlayers()) {
                             p.sendMessage("%s 玩家获得季军！".replace("%s", event.getPlayer().getName()));
+                            UIScoreboard.drawScoreBoardEntry(p,MainClass.getScoreboardSetting("scoreboard_objective_name"),MainClass.getScoreboardSetting("scoreboard_display_name"),"\uE176 Rank: 3rd");
                         }
                         break;
                     default:
-                        for (Player p : room.players) {
+                        for (Player p : room.getPlayers()) {
                             p.sendMessage("%s 玩家到达终点！".replace("%s", event.getPlayer().getName()));
+                            UIScoreboard.drawScoreBoardEntry(p,MainClass.getScoreboardSetting("scoreboard_objective_name"),MainClass.getScoreboardSetting("scoreboard_display_name"),"\uE176 Rank: "+(roomFinishPlayers.get(room).indexOf(event.getPlayer())+1)+"th");
                         }
                         break;
                 }
+
+                 */
             }
         }
     }
@@ -85,9 +93,12 @@ public class Event implements Listener {
 
     @EventHandler
     public void breakBlocks(BlockBreakEvent event){
-        if(Room.getRoom(event.getPlayer()) == null){return;}
-        if(MainClass.getBlockAddonsInit(event.getBlock()) != null){
-            for(Effect effect:MainClass.getBlockAddonsInit(event.getBlock())){
+        Room room = Room.getRoom(event.getPlayer());
+        if(room == null){return;}
+        if(room.getRoomStatus() != RoomStatus.ROOM_STATUS_GameStart){ return; }
+        List<Effect> effectList = getBlockAddonsInit(event.getBlock());
+        if(effectList != null){
+            for(Effect effect:effectList){
                 cn.nukkit.potion.Effect effect1 = Effect.parseEffect(event.getPlayer(),effect);
                 effect1.setVisible(true);
                 event.getPlayer().addEffect(Effect.parseEffect(event.getPlayer(),effect));
@@ -107,35 +118,20 @@ public class Event implements Listener {
             event.getPlayer().getInventory().addItem(item);
             event.getPlayer().sendMessage("获得5个屏障方块！");
         }
-        breakBlocks.get(Room.getRoom(event.getPlayer())).add(event.getBlock());
         event.setDrops(new Item[0]);
         event.setDropExp(0);
     }
 
     @EventHandler
-    public void placeBlocks(BlockPlaceEvent event){
-        if(Room.getRoom(event.getPlayer()) == null){return;}
-        placeBlocks.get(Room.getRoom(event.getPlayer())).add(event.getBlock());
-    }
-
-    @EventHandler
-    public void RoomReadyStartEvent(RoomReadyStartEvent event){
-        Room room = event.getRoom();
-        for(Player p:room.players){
-            p.getInventory().clearAll();
-        }
-    }
-
-    @EventHandler
     public void RoomGameStartEvent(RoomGameStartEvent event){
         Room room = event.getRoom();
-        for(Player p:room.players){
-            p.getInventory().clearAll();
+        for(Player p:room.getPlayers()){
             Event.roomFinishPlayers.put(event.getRoom(),new ArrayList<>());
-            breakBlocks.put(event.getRoom(),new ArrayList<>());
-            placeBlocks.put(event.getRoom(),new ArrayList<>());
-            p.teleportImmediate(new Location(room.startSpawn.x,room.startSpawn.y,room.startSpawn.z,room.startSpawn.level));
-            p.getInventory().addItem(new ItemPickaxeDiamond());
+            p.teleportImmediate(new Location(room.getStartSpawn().x,room.getStartSpawn().y,room.getStartSpawn().z,room.getStartSpawn().level));
+            Item pickaxe = Item.get(Item.DIAMOND_PICKAXE);
+            pickaxe.setCount(1);
+            pickaxe.setCustomName("英雄之镐");
+            p.getInventory().addItem(pickaxe);
             Sound.playResourcePackOggMusic(p, "game_begin");
         }
     }
@@ -144,9 +140,9 @@ public class Event implements Listener {
     public void ceremony(RoomCeremonyEvent event){
         List<Player> players = roomFinishPlayers.get(event.getRoom());
         Config config = new Config(MainClass.path+"/rooms.yml",Config.YAML);
-        List<String> winnerCmds = config.getList(event.getRoom().roomName+".WinCommands",new ArrayList());
-        List<String> failCmds = config.getList(event.getRoom().roomName+".FailComands",new ArrayList());
-        for(Player p:event.getRoom().players){
+        List<String> winnerCmds = config.getList(event.getRoom().getRoomName()+".WinCommands",new ArrayList());
+        List<String> failCmds = config.getList(event.getRoom().getRoomName()+".FailComands",new ArrayList());
+        for(Player p:event.getRoom().getPlayers()){
             if(players.contains(p)){
                 for(String cmd:winnerCmds){
                     Server.getInstance().dispatchCommand(Server.getInstance().getConsoleSender(),cmd.replace("{player}",p.getName()));
@@ -161,45 +157,45 @@ public class Event implements Listener {
 
     @EventHandler
     public void gameend(RoomGameEndEvent event){
-        for(Player p:event.getRoom().players){
+        for(Player p:event.getRoom().getPlayers()){
             if(roomFinishPlayers.get(event.getRoom()).contains(p)){
                 p.sendTitle("比赛结束","恭喜您获得了第"+(roomFinishPlayers.get(event.getRoom()).indexOf(p)+1)+"名",10,20,10);
+                //UIScoreboard.drawScoreBoardEntry(p,MainClass.getScoreboardSetting("scoreboard_objective_name"),MainClass.getScoreboardSetting("scoreboard_display_name"),MainClass.getScoreboardSetting("rank_format").replace("%rank%", String.valueOf(roomFinishPlayers.get(event.getRoom()).indexOf(p)+1)));
                 Sound.playResourcePackOggMusic(p,"winning");
             }else{
                 p.sendTitle("比赛结束","您未完成比赛！",10,20,10);
+                //UIScoreboard.drawScoreBoardEntry(p,MainClass.getScoreboardSetting("scoreboard_objective_name"),MainClass.getScoreboardSetting("scoreboard_display_name"),MainClass.getScoreboardSetting("failed_format"));
                 Sound.playResourcePackOggMusic(p, "game_over");
             }
         }
-        roomFinishPlayers.put(event.getRoom(),new ArrayList<>());
     }
 
     @EventHandler
     public void end(RoomEndEvent event){
-        for(Player p:event.getRoom().players) {
-            p.getInventory().clearAll();
-            Inventory.saveBag(p);
-            Position pos = Server.getInstance().getDefaultLevel().getSafeSpawn();
-            p.teleportImmediate(new Location(pos.x,pos.y,pos.z,pos.level));
-            //玩家先走
-        }
-        String levelName = event.getRoom().roomName + "&worldload";
-        Level level = Server.getInstance().getLevelByName(levelName);
-        for(Block block:breakBlocks.get(event.getRoom())){
-            level.setBlock(new Vector3(block.x,block.y,block.z),block);
-        }
-        for(Block block:placeBlocks.get(event.getRoom())){
-            level.setBlock(new Vector3(block.x,block.y,block.z), Block.get(0));
-        }
-        breakBlocks.put(event.getRoom(),new ArrayList<>());
-        placeBlocks.put(event.getRoom(),new ArrayList<>());
+        roomFinishPlayers.put(event.getRoom(),new ArrayList<>());
     }
 
     @EventHandler
     public void RoomGameProcessingListener(RoomGameProcessingListener event){
         Room room = event.getRoom();
-        for(Player p:room.players){
-            if(roomFinishPlayers.get(room).contains(p)){
-                p.sendActionBar("剩余时间:"+(room.gameTime - room.time)+"秒！");
+        int lastSec = room.getGameTime() - room.getTime();
+        for(Player p:room.getPlayers()){
+            if(lastSec == room.getGameTime()){
+                if(roomFinishPlayers.get(event.getRoom()).contains(p)){
+                    p.sendTitle("比赛结束","恭喜您获得了第"+(roomFinishPlayers.get(event.getRoom()).indexOf(p)+1)+"名",10,20,10);
+                    UIScoreboard.drawScoreBoardEntry(p,MainClass.getScoreboardSetting("scoreboard_objective_name"),MainClass.getScoreboardSetting("scoreboard_display_name"),MainClass.getScoreboardSetting("rank_format").replace("%rank%", String.valueOf(roomFinishPlayers.get(event.getRoom()).indexOf(p)+1)));
+                    Sound.playResourcePackOggMusic(p,"winning");
+                }else{
+                    p.sendTitle("比赛结束","您未完成比赛！",10,20,10);
+                    UIScoreboard.drawScoreBoardEntry(p,MainClass.getScoreboardSetting("scoreboard_objective_name"),MainClass.getScoreboardSetting("scoreboard_display_name"),MainClass.getScoreboardSetting("failed_format"));
+                    Sound.playResourcePackOggMusic(p, "game_over");
+                }
+            }else {
+                if (!roomFinishPlayers.get(room).contains(p)) {
+                    UIScoreboard.drawTimeBoardEntry(p, MainClass.getScoreboardSetting("scoreboard_objective_name"), MainClass.getScoreboardSetting("scoreboard_display_name"), MainClass.getScoreboardSetting("time_format").replace("%time%", UIScoreboard.secToTime(lastSec)));
+                } else {
+                    UIScoreboard.drawScoreBoardEntry(p, MainClass.getScoreboardSetting("scoreboard_objective_name"), MainClass.getScoreboardSetting("scoreboard_display_name"), MainClass.getScoreboardSetting("rank_format").replace("%rank%", String.valueOf(roomFinishPlayers.get(room).indexOf(p) + 1)), MainClass.getScoreboardSetting("time_format").replace("%time%", UIScoreboard.secToTime(lastSec)));
+                }
             }
         }
     }
@@ -207,7 +203,6 @@ public class Event implements Listener {
     @EventHandler
     public void Quit(PlayerQuitEvent event){
         if(Room.getRoom(event.getPlayer()) != null){
-            Inventory.saveBag(event.getPlayer());
             event.getPlayer().setPosition(Server.getInstance().getDefaultLevel().getSafeSpawn());
             playerFormWindowSimpleHashMap.remove(event.getPlayer());
         }
@@ -217,19 +212,18 @@ public class Event implements Listener {
     public void GuiRespondedEvent(PlayerFormRespondedEvent event){
         if(event.getResponse() == null){ return; }
         if(Event.playerFormWindowSimpleHashMap.containsKey(event.getPlayer())){
+            if(event.getWindow() != Event.playerFormWindowSimpleHashMap.get(event.getPlayer())){ return;}
             FormResponseSimple formResponseSimple = (FormResponseSimple) event.getResponse();
             if(Room.getRoom(formResponseSimple.getClickedButton().getText()) != null){
-                if(Server.getInstance().isLevelLoaded(Room.getRoom(formResponseSimple.getClickedButton().getText()).roomName + "&worldload")) {
-                    if(Room.getRoom(formResponseSimple.getClickedButton().getText()).roomStatus == RoomStatus.ROOM_STATUS_WAIT) {
+                if(Server.getInstance().isLevelLoaded(Room.getRoom(formResponseSimple.getClickedButton().getText()).getRoomName() + "&worldload")) {
+                    if(Room.getRoom(formResponseSimple.getClickedButton().getText()).getRoomStatus() == RoomStatus.ROOM_STATUS_WAIT) {
                         Room room = Room.getRoom(formResponseSimple.getClickedButton().getText());
-                        if(Room.addRoomPlayer(room, event.getPlayer())) {
-                            event.getPlayer().teleportImmediate(new Location(room.waitSpawn.x, room.waitSpawn.y, room.waitSpawn.z, room.waitSpawn.level));
-                            Inventory.saveBag(event.getPlayer());
-                            PlayerInventory inventory = event.getPlayer().getInventory();
-                            event.getPlayer().getInventory().clearAll();
+                        if(room.addPlayer(event.getPlayer())) {
+                            Player p = event.getPlayer();
+                            p.teleportImmediate(new Location(room.getWaitSpawn().x, room.getWaitSpawn().y, room.getWaitSpawn().z, room.getWaitSpawn().level));
                             Item addItem = new ItemBookEnchanted();
                             addItem.setCustomName(TextFormat.BOLD+"退出房间");
-                            event.getPlayer().getInventory().addItem(addItem);
+                            p.getInventory().addItem(addItem);
                         }else{
                             event.getPlayer().sendMessage("房间人数已满！");
                         }
@@ -244,6 +238,12 @@ public class Event implements Listener {
             }
         }
         playerFormWindowSimpleHashMap.remove(event.getPlayer());
+    }
+
+    @EventHandler
+    public void NoHunger(PlayerFoodLevelChangeEvent event){
+        if(Room.getRoom(event.getPlayer()) == null){ return; }
+        event.setCancelled();
     }
 
     //内置简单反作弊
@@ -277,5 +277,17 @@ public class Event implements Listener {
         if(!event.getPlayer().isOp()){
             event.setCancelled(true);
         }
+    }
+
+    public static List<Effect> getBlockAddonsInit(Block block){
+        int blockid = block.getId();
+        int blockmeta = block.getDamage();
+        String s = blockid+":"+blockmeta;
+        for(String string: MainClass.effectHashMap.keySet()){
+            if(s.equals(string)){
+                return MainClass.effectHashMap.get(string);
+            }
+        }
+        return null;
     }
 }
