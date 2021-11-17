@@ -11,7 +11,8 @@ import cn.nukkit.form.response.FormResponseSimple;
 import cn.nukkit.form.window.FormWindowSimple;
 import cn.nukkit.item.Item;
 import cn.nukkit.item.ItemBookEnchanted;
-import cn.nukkit.level.Location;
+import cn.nukkit.item.ItemEmerald;
+import cn.nukkit.item.ItemTotem;
 import cn.nukkit.level.Position;
 import cn.nukkit.scheduler.Task;
 import cn.nukkit.utils.Config;
@@ -21,7 +22,9 @@ import gameapi.event.*;
 import gameapi.room.Room;
 import gameapi.room.RoomStatus;
 import gameapi.scoreboard.UIScoreboard;
+import gameapi.skill.CustomSkills;
 import gameapi.sound.Sound;
+import gameapi.utils.GameRecord;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -35,13 +38,39 @@ public class Event implements Listener {
     @EventHandler
     public void touch(PlayerInteractEvent event){
         Room room = Room.getRoom(event.getPlayer());
+        Item item = event.getItem();
         if(room == null){ return; }
-        if(event.getItem() instanceof ItemBookEnchanted && event.getItem().getCustomName().equals(TextFormat.BOLD+"退出房间")){
+        if(item instanceof ItemBookEnchanted && item.getCustomName().equals(TextFormat.BOLD+"退出房间")){
             room.removePlayer(event.getPlayer(),true);
             Position spawn = Server.getInstance().getDefaultLevel().getSafeSpawn();
             event.getPlayer().sendMessage("您已退出房间！");
-            event.getPlayer().teleportImmediate(new Location(spawn.x,spawn.y,spawn.z,spawn.level));
+            event.getPlayer().teleport(spawn.getLocation());
             return;
+        }
+        if(item.hasCompoundTag()){
+            if(item.getNamedTag().contains("ItemType")){
+                if(item.getNamedTag().getString("ItemType").equals("skillItem")){
+                    Player p = event.getPlayer();
+                    p.getInventory().setItem(2, Item.get(Block.AIR));
+                    Effect effect = new Effect(cn.nukkit.potion.Effect.SPEED,2,2);
+                    CustomSkills skill1 = new CustomSkills("加速","Speed Up",Item.get(Item.FEATHER), effect, true, 100);
+                    p.sendMessage(TextFormat.GOLD+"您使用了技能:"+skill1.getCustomName());
+                    cn.nukkit.potion.Effect effect1 = Effect.parseEffect(event.getPlayer(),effect);
+                    effect1.setVisible(true);
+                    p.addEffect(Effect.parseEffect(event.getPlayer(),effect));
+                    Server.getInstance().getScheduler().scheduleDelayedTask(new Task() {
+                        @Override
+                        public void onRun(int i) {
+                            if(Room.getRoom(p) != null && Room.getRoom(p).getRoomStatus() == RoomStatus.ROOM_STATUS_GameStart) {
+                                skill1.giveSkillItem(event.getPlayer(), false);
+                                //p.removeEffect(skill1.getEffect().getId());
+                                p.sendMessage(TextFormat.GREEN + "技能冷却结束！");
+                            }
+                            this.onCancel();
+                        }
+                    },skill1.getCoolDownTick());
+                }
+            }
         }
         if(event.getBlock().getId() == Block.EMERALD_BLOCK && room.getRoomStatus() == RoomStatus.ROOM_STATUS_GameStart) {
             if (!roomFinishPlayers.get(room).contains(event.getPlayer())) {
@@ -103,6 +132,7 @@ public class Event implements Listener {
                 effect1.setVisible(true);
                 event.getPlayer().addEffect(Effect.parseEffect(event.getPlayer(),effect));
                 event.getPlayer().sendMessage("获得"+effect1.getName()+"*"+effect1.getAmplifier()+"*"+effect1.getDuration()/20+"秒");
+                /*
                 Server.getInstance().getScheduler().scheduleDelayedTask(new Task() {
                     @Override
                     public void onRun(int i) {
@@ -110,6 +140,8 @@ public class Event implements Listener {
                         this.onCancel();
                     }
                 },effect1.getDuration());
+                
+                 */
             }
         }
         if(event.getBlock().getId() == Block.RED_MUSHROOM_BLOCK){
@@ -127,11 +159,13 @@ public class Event implements Listener {
         Room room = event.getRoom();
         for(Player p:room.getPlayers()){
             Event.roomFinishPlayers.put(event.getRoom(),new ArrayList<>());
-            p.teleportImmediate(new Location(room.getStartSpawn().x,room.getStartSpawn().y,room.getStartSpawn().z,room.getStartSpawn().level));
             Item pickaxe = Item.get(Item.DIAMOND_PICKAXE);
             pickaxe.setCount(1);
             pickaxe.setCustomName("英雄之镐");
             p.getInventory().addItem(pickaxe);
+            Effect effect = new Effect(cn.nukkit.potion.Effect.SPEED,2,5);
+            CustomSkills skill1 = new CustomSkills("加速","Speed Up",Item.get(Item.FEATHER), effect, true, 100);
+            skill1.giveSkillItem(p);
             Sound.playResourcePackOggMusic(p, "game_begin");
         }
     }
@@ -144,10 +178,14 @@ public class Event implements Listener {
         List<String> failCmds = config.getList(event.getRoom().getRoomName()+".FailComands",new ArrayList());
         for(Player p:event.getRoom().getPlayers()){
             if(players.contains(p)){
+                GameRecord.addGameRecord("DRecknessHero",p.getName(), "winning",1);
+                p.sendMessage("§l§e您已成功完成比赛 §l§a"+GameRecord.getGameRecord("DRecknessHero",p.getName(),"winning")+" §l§e次");
                 for(String cmd:winnerCmds){
                     Server.getInstance().dispatchCommand(Server.getInstance().getConsoleSender(),cmd.replace("{player}",p.getName()));
                 }
             }else{
+                GameRecord.addGameRecord("DRecknessHero",p.getName(), "failed",1);
+                p.sendMessage("§l§e您未完成比赛 §l§c"+GameRecord.getGameRecord("DRecknessHero",p.getName(),"winning")+" §l§e次");
                 for(String cmd:failCmds){
                     Server.getInstance().dispatchCommand(Server.getInstance().getConsoleSender(),cmd.replace("{player}",p.getName()));
                 }
@@ -180,6 +218,7 @@ public class Event implements Listener {
         Room room = event.getRoom();
         int lastSec = room.getGameTime() - room.getTime();
         for(Player p:room.getPlayers()){
+            p.getFoodData().setLevel(20);
             if(lastSec == room.getGameTime()){
                 if(roomFinishPlayers.get(event.getRoom()).contains(p)){
                     p.sendTitle("比赛结束","恭喜您获得了第"+(roomFinishPlayers.get(event.getRoom()).indexOf(p)+1)+"名",10,20,10);
@@ -214,16 +253,29 @@ public class Event implements Listener {
         if(Event.playerFormWindowSimpleHashMap.containsKey(event.getPlayer())){
             if(event.getWindow() != Event.playerFormWindowSimpleHashMap.get(event.getPlayer())){ return;}
             FormResponseSimple formResponseSimple = (FormResponseSimple) event.getResponse();
-            if(Room.getRoom(formResponseSimple.getClickedButton().getText()) != null){
-                if(Server.getInstance().isLevelLoaded(Room.getRoom(formResponseSimple.getClickedButton().getText()).getRoomName() + "&worldload")) {
-                    if(Room.getRoom(formResponseSimple.getClickedButton().getText()).getRoomStatus() == RoomStatus.ROOM_STATUS_WAIT) {
-                        Room room = Room.getRoom(formResponseSimple.getClickedButton().getText());
+            Room room = Room.getRoom(formResponseSimple.getClickedButton().getText());
+            if(room != null){
+                if(Server.getInstance().isLevelLoaded(room.getRoomPlayLevel())) {
+                    RoomStatus rs = room.getRoomStatus();
+                    if(rs == RoomStatus.ROOM_STATUS_WAIT || rs == RoomStatus.ROOM_STATUS_PreStart) {
                         if(room.addPlayer(event.getPlayer())) {
                             Player p = event.getPlayer();
-                            p.teleportImmediate(new Location(room.getWaitSpawn().x, room.getWaitSpawn().y, room.getWaitSpawn().z, room.getWaitSpawn().level));
-                            Item addItem = new ItemBookEnchanted();
-                            addItem.setCustomName(TextFormat.BOLD+"退出房间");
-                            p.getInventory().addItem(addItem);
+                            p.getInventory().clearAll();
+                            p.getUIInventory().clearAll();
+                            p.getFoodData().setLevel(p.getFoodData().getMaxLevel());
+                            p.teleport(Position.fromObject(room.getWaitSpawn().getLocation(), Server.getInstance().getLevelByName(room.getRoomPlayLevel())));
+                            p.setGamemode(2);
+                            Item addItem1 = new ItemBookEnchanted();
+                            addItem1.setCustomName("§l§c退出房间");
+                            p.getInventory().setItem(0,addItem1);
+
+                            Item addItem2 = new ItemEmerald();
+                            addItem2.setCustomName("§l§a历史战绩");
+                            p.getInventory().setItem(7,addItem2);
+
+                            Item addItem3 = new ItemTotem(0);
+                            addItem3.setCustomName("§l§e选择职业");
+                            p.getInventory().setItem(8,addItem3);
                         }else{
                             event.getPlayer().sendMessage("房间人数已满！");
                         }
@@ -238,45 +290,6 @@ public class Event implements Listener {
             }
         }
         playerFormWindowSimpleHashMap.remove(event.getPlayer());
-    }
-
-    @EventHandler
-    public void NoHunger(PlayerFoodLevelChangeEvent event){
-        if(Room.getRoom(event.getPlayer()) == null){ return; }
-        event.setCancelled();
-    }
-
-    //内置简单反作弊
-    @EventHandler
-    public void FlyEvent(PlayerToggleFlightEvent event){
-        if(Room.getRoom(event.getPlayer()) == null){ return; }
-        if(!event.getPlayer().isOp()){
-            event.setCancelled(true);
-        }
-    }
-
-    @EventHandler
-    public void PlayerTeleportEvent(PlayerTeleportEvent event){
-        if(Room.getRoom(event.getPlayer()) == null){ return; }
-        if(!event.getPlayer().isOp()){
-            event.setCancelled(true);
-        }
-    }
-
-    @EventHandler
-    public void PlayerCommandPreprocessEvent(PlayerCommandPreprocessEvent event){
-        if(Room.getRoom(event.getPlayer()) == null){ return; }
-        if(!event.getPlayer().isOp()){
-            event.setCancelled(true);
-        }
-    }
-
-    @EventHandler
-    public void PlayerInvalidMoveEvent(PlayerInvalidMoveEvent event){
-        if(Room.getRoom(event.getPlayer()) == null){ return; }
-        if(!event.getPlayer().isOp()){
-            event.setCancelled(true);
-        }
     }
 
     public static List<Effect> getBlockAddonsInit(Block block){

@@ -97,22 +97,25 @@ public class MainClass extends PluginBase implements Listener {
                 RoomRule roomRule = new RoomRule(0);
                 roomRule.allowBreakBlock = false;
                 roomRule.allowPlaceBlock = false;
-                roomRule.noDropDamage = true;
                 roomRule.allowFallDamage = false;
                 roomRule.allowDamagePlayer = false;
-                roomRule.allowHungerDamage = true;
+                roomRule.allowHungerDamage = false;
+                roomRule.allowFoodLevelChange = false;
                 roomRule.canBreakBlocks.add(100);
                 roomRule.canBreakBlocks.add(152);
                 roomRule.canPlaceBlocks.add(152);
-                Room room = new Room(roomRule,1);
+                Room room = new Room(roomRule, "", "",1);
                 if (config.exists(s + ".LoadWorld")) {
-                    Arena.copyWorldAndLoad(s + "&worldload", config.getString(s + ".LoadWorld"));
-                    if (Server.getInstance().getLevelByName(config.getString(s + ".LoadWorld")) == null) {
-                        if (Server.getInstance().isLevelLoaded(s + "&worldload")) {
-                            Server.getInstance().getLevelByName(s + "&worldload").setAutoSave(false);
-                        } else {
-                            this.getLogger().info("房间【" + s + "】加载失败,请检查加载地图是否存在！");
-                            continue;
+                    String backup = config.getString(s + ".LoadWorld");
+                    room.setRoomLevelBackup(backup);
+                    room.setRoomPlayLevel(s);
+                    if (Server.getInstance().getLevelByName(config.getString(s)) == null) {
+                        if(Arena.copyWorldAndLoad(s, backup)){
+                            if (Server.getInstance().isLevelLoaded(s)) {
+                                Server.getInstance().getLevelByName(s).setAutoSave(false);
+                            } else {
+                                this.getLogger().info("房间【" + s + "】检测已经加载！");
+                            }
                         }
                     } else {
                         this.getLogger().info("房间【" + s + "】加载失败,请检查地图是否存在！");
@@ -126,7 +129,7 @@ public class MainClass extends PluginBase implements Listener {
                 if(config.exists(s+".WaitSpawn")){
                     String[] strings = config.getString(s+".WaitSpawn").split(":");
                     if(strings.length != 3){ this.getLogger().info("房间【"+s+"】加载失败,请检查出生地配置！");return;}
-                    room.setWaitSpawn(new Position(Double.parseDouble(strings[0]),Double.parseDouble(strings[1]),Double.parseDouble(strings[2]), Server.getInstance().getLevelByName(s+ "&worldload")).getLocation());
+                    room.setWaitSpawn(new Position(Double.parseDouble(strings[0]),Double.parseDouble(strings[1]),Double.parseDouble(strings[2]), Server.getInstance().getLevelByName(s)).getLocation());
                 }else{
                     this.getLogger().info("房间【"+s+"】加载失败,请检查等待点配置！");
                     continue;
@@ -135,7 +138,7 @@ public class MainClass extends PluginBase implements Listener {
                 if(config.exists(s+".StartSpawn")){
                     String[] strings = config.getString(s+".StartSpawn").split(":");
                     if(strings.length != 3){ this.getLogger().info("房间【"+s+"】加载失败,请检查出生地配置！");return;}
-                    room.setStartSpawn(new Position(Double.parseDouble(strings[0]),Double.parseDouble(strings[1]),Double.parseDouble(strings[2]), Server.getInstance().getLevelByName(s+ "&worldload")).getLocation());
+                    room.setStartSpawn(new Position(Double.parseDouble(strings[0]),Double.parseDouble(strings[1]),Double.parseDouble(strings[2]), Server.getInstance().getLevelByName(s)).getLocation());
                 }else{
                     this.getLogger().info("房间【"+s+"】加载失败,请检查出生地配置！");
                     continue;
