@@ -4,16 +4,18 @@ import cn.nukkit.Player;
 import cn.nukkit.Server;
 import cn.nukkit.block.Block;
 import cn.nukkit.event.EventHandler;
+import cn.nukkit.event.EventPriority;
 import cn.nukkit.event.Listener;
 import cn.nukkit.event.block.BlockBreakEvent;
-import cn.nukkit.event.player.*;
+import cn.nukkit.event.player.PlayerFormRespondedEvent;
+import cn.nukkit.event.player.PlayerInteractEvent;
+import cn.nukkit.event.player.PlayerQuitEvent;
 import cn.nukkit.form.response.FormResponseSimple;
 import cn.nukkit.form.window.FormWindowSimple;
 import cn.nukkit.item.Item;
 import cn.nukkit.item.ItemBookEnchanted;
 import cn.nukkit.item.ItemEmerald;
 import cn.nukkit.item.ItemTotem;
-import cn.nukkit.level.Position;
 import cn.nukkit.scheduler.Task;
 import cn.nukkit.utils.Config;
 import cn.nukkit.utils.TextFormat;
@@ -26,6 +28,7 @@ import gameapi.skill.CustomSkills;
 import gameapi.sound.Sound;
 import gameapi.utils.GameRecord;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -35,18 +38,32 @@ public class Event implements Listener {
     public static HashMap<Room, List<Player>> roomFinishPlayers = new HashMap<>();
     public static ConcurrentHashMap<Player, FormWindowSimple> playerFormWindowSimpleHashMap = new ConcurrentHashMap<>();
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.HIGH)
     public void touch(PlayerInteractEvent event){
-        Room room = Room.getRoom(event.getPlayer());
+        Room room = Room.getRoom("DRecknessHero", event.getPlayer());
+        Player player = event.getPlayer();
         Item item = event.getItem();
         if(room == null){ return; }
-        if(item instanceof ItemBookEnchanted && item.getCustomName().equals(TextFormat.BOLD+"退出房间")){
-            room.removePlayer(event.getPlayer(),true);
-            Position spawn = Server.getInstance().getDefaultLevel().getSafeSpawn();
-            event.getPlayer().sendMessage("您已退出房间！");
-            event.getPlayer().teleport(spawn.getLocation());
+        if(item instanceof ItemBookEnchanted && item.getCustomName().equals("§l§c退出房间")){
+            room.removePlayer(player,true);
+            player.sendMessage("§l§c您已退出房间！");
             return;
         }
+
+        if(item instanceof ItemEmerald && item.getCustomName().equals("§l§a历史战绩")){
+            Window.showPlayerHistoryWindow(player);
+            return;
+        }
+
+        if(item instanceof ItemTotem && item.getCustomName().equals("§l§e选择职业")){
+            try {
+                Window.showPlayerSkillSelectWindow(player);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            return;
+        }
+
         if(item.hasCompoundTag()){
             if(item.getNamedTag().contains("ItemType")){
                 if(item.getNamedTag().getString("ItemType").equals("skillItem")){
@@ -72,6 +89,7 @@ public class Event implements Listener {
                 }
             }
         }
+
         if(event.getBlock().getId() == Block.EMERALD_BLOCK && room.getRoomStatus() == RoomStatus.ROOM_STATUS_GameStart) {
             if (!roomFinishPlayers.get(room).contains(event.getPlayer())) {
                 roomFinishPlayers.get(room).add(event.getPlayer());
@@ -122,10 +140,10 @@ public class Event implements Listener {
 
     @EventHandler
     public void breakBlocks(BlockBreakEvent event){
-        Room room = Room.getRoom(event.getPlayer());
+        Room room = Room.getRoom("DRecknessHero", event.getPlayer());
         if(room == null){return;}
         if(room.getRoomStatus() != RoomStatus.ROOM_STATUS_GameStart){ return; }
-        List<Effect> effectList = getBlockAddonsInit(event.getBlock());
+        List<Effect> effectList = MainClass.getBlockAddonsInit(event.getBlock());
         if(effectList != null){
             for(Effect effect:effectList){
                 cn.nukkit.potion.Effect effect1 = Effect.parseEffect(event.getPlayer(),effect);
@@ -157,12 +175,13 @@ public class Event implements Listener {
     @EventHandler
     public void RoomGameStartEvent(RoomGameStartEvent event){
         Room room = event.getRoom();
+        if(!event.getRoom().getGameName().equals("DRecknessHero")){ return;}
         for(Player p:room.getPlayers()){
             Event.roomFinishPlayers.put(event.getRoom(),new ArrayList<>());
             Item pickaxe = Item.get(Item.DIAMOND_PICKAXE);
             pickaxe.setCount(1);
             pickaxe.setCustomName("英雄之镐");
-            p.getInventory().addItem(pickaxe);
+            p.getInventory().setItem(0, pickaxe);
             Effect effect = new Effect(cn.nukkit.potion.Effect.SPEED,2,5);
             CustomSkills skill1 = new CustomSkills("加速","Speed Up",Item.get(Item.FEATHER), effect, true, 100);
             skill1.giveSkillItem(p);
@@ -172,6 +191,7 @@ public class Event implements Listener {
 
     @EventHandler
     public void ceremony(RoomCeremonyEvent event){
+        if(!event.getRoom().getGameName().equals("DRecknessHero")){ return;}
         List<Player> players = roomFinishPlayers.get(event.getRoom());
         Config config = new Config(MainClass.path+"/rooms.yml",Config.YAML);
         List<String> winnerCmds = config.getList(event.getRoom().getRoomName()+".WinCommands",new ArrayList());
@@ -185,7 +205,7 @@ public class Event implements Listener {
                 }
             }else{
                 GameRecord.addGameRecord("DRecknessHero",p.getName(), "failed",1);
-                p.sendMessage("§l§e您未完成比赛 §l§c"+GameRecord.getGameRecord("DRecknessHero",p.getName(),"winning")+" §l§e次");
+                p.sendMessage("§l§e您未完成比赛 §l§c"+GameRecord.getGameRecord("DRecknessHero",p.getName(),"failed")+" §l§e次");
                 for(String cmd:failCmds){
                     Server.getInstance().dispatchCommand(Server.getInstance().getConsoleSender(),cmd.replace("{player}",p.getName()));
                 }
@@ -194,7 +214,8 @@ public class Event implements Listener {
     }
 
     @EventHandler
-    public void gameend(RoomGameEndEvent event){
+    public void gameEnd(RoomGameEndEvent event){
+        if(!event.getRoom().getGameName().equals("DRecknessHero")){ return;}
         for(Player p:event.getRoom().getPlayers()){
             if(roomFinishPlayers.get(event.getRoom()).contains(p)){
                 p.sendTitle("比赛结束","恭喜您获得了第"+(roomFinishPlayers.get(event.getRoom()).indexOf(p)+1)+"名",10,20,10);
@@ -210,12 +231,14 @@ public class Event implements Listener {
 
     @EventHandler
     public void end(RoomEndEvent event){
+        if(!event.getRoom().getGameName().equals("DRecknessHero")){ return;}
         roomFinishPlayers.put(event.getRoom(),new ArrayList<>());
     }
 
     @EventHandler
     public void RoomGameProcessingListener(RoomGameProcessingListener event){
         Room room = event.getRoom();
+        if(!room.getGameName().equals("DRecknessHero")){ return;}
         int lastSec = room.getGameTime() - room.getTime();
         for(Player p:room.getPlayers()){
             p.getFoodData().setLevel(20);
@@ -240,67 +263,27 @@ public class Event implements Listener {
     }
 
     @EventHandler
-    public void Quit(PlayerQuitEvent event){
-        if(Room.getRoom(event.getPlayer()) != null){
-            event.getPlayer().setPosition(Server.getInstance().getDefaultLevel().getSafeSpawn());
-            playerFormWindowSimpleHashMap.remove(event.getPlayer());
-        }
-    }
-
-    @EventHandler
     public void GuiRespondedEvent(PlayerFormRespondedEvent event){
         if(event.getResponse() == null){ return; }
         if(Event.playerFormWindowSimpleHashMap.containsKey(event.getPlayer())){
-            if(event.getWindow() != Event.playerFormWindowSimpleHashMap.get(event.getPlayer())){ return;}
+            if(event.getWindow() != Event.playerFormWindowSimpleHashMap.get(event.getPlayer())){ return; }
+            if(!(event.getWindow() instanceof FormWindowSimple)){ return; }
+            String title = ((FormWindowSimple)event.getWindow()).getTitle();
             FormResponseSimple formResponseSimple = (FormResponseSimple) event.getResponse();
-            Room room = Room.getRoom(formResponseSimple.getClickedButton().getText());
-            if(room != null){
-                if(Server.getInstance().isLevelLoaded(room.getRoomPlayLevel())) {
-                    RoomStatus rs = room.getRoomStatus();
-                    if(rs == RoomStatus.ROOM_STATUS_WAIT || rs == RoomStatus.ROOM_STATUS_PreStart) {
-                        if(room.addPlayer(event.getPlayer())) {
-                            Player p = event.getPlayer();
-                            p.getInventory().clearAll();
-                            p.getUIInventory().clearAll();
-                            p.getFoodData().setLevel(p.getFoodData().getMaxLevel());
-                            p.teleport(Position.fromObject(room.getWaitSpawn().getLocation(), Server.getInstance().getLevelByName(room.getRoomPlayLevel())));
-                            p.setGamemode(2);
-                            Item addItem1 = new ItemBookEnchanted();
-                            addItem1.setCustomName("§l§c退出房间");
-                            p.getInventory().setItem(0,addItem1);
-
-                            Item addItem2 = new ItemEmerald();
-                            addItem2.setCustomName("§l§a历史战绩");
-                            p.getInventory().setItem(7,addItem2);
-
-                            Item addItem3 = new ItemTotem(0);
-                            addItem3.setCustomName("§l§e选择职业");
-                            p.getInventory().setItem(8,addItem3);
-                        }else{
-                            event.getPlayer().sendMessage("房间人数已满！");
-                        }
-                    }else{
-                        event.getPlayer().sendMessage("游戏已经开始！");
+            Player player = event.getPlayer();
+            switch (title){
+                case "§l§e选择房间":
+                    Room room = Room.getRoom("DRecknessHero", formResponseSimple.getClickedButton().getText());
+                    MainClass.processJoin(room, player);
+                    break;
+                case "§l§e选择技能":
+                    Room room1 = Room.getRoom(player);
+                    if(room1 != null){
+                        room1.setPlayerProperties(player,"skill1", formResponseSimple.getClickedButtonId());
                     }
-                }else{
-                    event.getPlayer().sendMessage("地图未加载完毕！");
-                }
-            }else{
-                event.getPlayer().sendMessage("该房间不存在！");
+                    break;
             }
         }
         playerFormWindowSimpleHashMap.remove(event.getPlayer());
-    }
-
-    public static List<Effect> getBlockAddonsInit(Block block){
-        int blockid = block.getId();
-        int blockmeta = block.getDamage();
-        String s = blockid+":"+blockmeta;
-        for(String string: MainClass.effectHashMap.keySet()){
-            if(s.equals(string)){
-                return MainClass.effectHashMap.get(string);
-            }
-        }
-        return null;
     }
 }

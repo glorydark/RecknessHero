@@ -1,7 +1,13 @@
 package testgame;
 
+import cn.nukkit.Player;
 import cn.nukkit.Server;
+import cn.nukkit.block.Block;
 import cn.nukkit.event.Listener;
+import cn.nukkit.item.Item;
+import cn.nukkit.item.ItemBookEnchanted;
+import cn.nukkit.item.ItemEmerald;
+import cn.nukkit.item.ItemTotem;
 import cn.nukkit.level.Position;
 import cn.nukkit.plugin.PluginBase;
 import cn.nukkit.utils.Config;
@@ -104,11 +110,11 @@ public class MainClass extends PluginBase implements Listener {
                 roomRule.canBreakBlocks.add(100);
                 roomRule.canBreakBlocks.add(152);
                 roomRule.canPlaceBlocks.add(152);
-                Room room = new Room(roomRule, "", "",1);
+                Room room = new Room("DRecknessHero", roomRule, "",1);
                 if (config.exists(s + ".LoadWorld")) {
                     String backup = config.getString(s + ".LoadWorld");
                     room.setRoomLevelBackup(backup);
-                    room.setRoomPlayLevel(s);
+                    room.setStartLevel(s);
                     if (Server.getInstance().getLevelByName(config.getString(s)) == null) {
                         if(Arena.copyWorldAndLoad(s, backup)){
                             if (Server.getInstance().isLevelLoaded(s)) {
@@ -161,14 +167,14 @@ public class MainClass extends PluginBase implements Listener {
                 if(config.exists(s+".MinPlayer")){
                     room.setMinPlayer(config.getInt(s+".MinPlayer",1));
                 }else{
-                    this.getLogger().info("房间【"+s+"】加载失败,请检查游戏时间配置！");
+                    this.getLogger().info("房间【"+s+"】加载失败,请检查最小玩家人数配置！");
                     continue;
                 }
 
                 if(config.exists(s+".MaxPlayer")){
                     room.setMinPlayer(config.getInt(s+".MaxPlayer",1));
                 }else{
-                    this.getLogger().info("房间【"+s+"】加载失败,请检查游戏时间配置！");
+                    this.getLogger().info("房间【"+s+"】加载失败,请检查最大玩家人数配置！");
                     continue;
                 }
                 Event.roomFinishPlayers.put(room,new ArrayList<>());
@@ -179,5 +185,55 @@ public class MainClass extends PluginBase implements Listener {
                 this.getLogger().info("房间【"+s+"】加载成功！");
             }
         }
+    }
+
+    public static void processJoin(Room room, Player p){
+        if(room != null){
+            if(Server.getInstance().isLevelLoaded(room.getStartLevel())) {
+                RoomStatus rs = room.getRoomStatus();
+                if(rs == RoomStatus.ROOM_STATUS_WAIT || rs == RoomStatus.ROOM_STATUS_PreStart) {
+                    if(room.addPlayer(p)) {
+                        p.getInventory().clearAll();
+                        p.getUIInventory().clearAll();
+                        p.getFoodData().setLevel(p.getFoodData().getMaxLevel());
+                        p.teleport(Position.fromObject(room.getWaitSpawn().getLocation(), Server.getInstance().getLevelByName(room.getStartLevel())));
+                        p.setGamemode(2);
+                        Item addItem1 = new ItemBookEnchanted();
+                        addItem1.setCustomName("§l§c退出房间");
+                        p.getInventory().setItem(0,addItem1);
+
+                        Item addItem2 = new ItemEmerald();
+                        addItem2.setCustomName("§l§a历史战绩");
+                        p.getInventory().setItem(7,addItem2);
+
+                        Item addItem3 = new ItemTotem(0);
+                        addItem3.setCustomName("§l§e选择职业");
+                        p.getInventory().setItem(8,addItem3);
+
+                        room.setPlayerProperties(p, "skill1", 0);
+                    }else{
+                        p.sendMessage("房间人数已满！");
+                    }
+                }else{
+                    p.sendMessage("游戏已经开始！");
+                }
+            }else{
+                p.sendMessage("地图未加载完毕！");
+            }
+        }else{
+            p.sendMessage("该房间不存在！");
+        }
+    }
+
+    public static List<Effect> getBlockAddonsInit(Block block){
+        int blockid = block.getId();
+        int blockmeta = block.getDamage();
+        String s = blockid+":"+blockmeta;
+        for(String string: MainClass.effectHashMap.keySet()){
+            if(s.equals(string)){
+                return MainClass.effectHashMap.get(string);
+            }
+        }
+        return null;
     }
 }
