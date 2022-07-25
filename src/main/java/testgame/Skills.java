@@ -1,5 +1,7 @@
 package testgame;
 
+import gameapi.scripts.CustomSkill;
+
 public class Skills {
     enum skills {
         SPEED_UP(0, "暴走达人", "加速"),
@@ -27,5 +29,9 @@ public class Skills {
         public String getJobName() {
             return this.jobName;
         }
+
+
     }
+
+    public static CustomSkill getSkill(Integer id){return MainClass.skills.get(id);}
 }

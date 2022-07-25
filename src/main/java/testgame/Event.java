@@ -3,36 +3,34 @@ package testgame;
 import cn.nukkit.Player;
 import cn.nukkit.Server;
 import cn.nukkit.block.Block;
+import cn.nukkit.block.BlockAir;
 import cn.nukkit.event.EventHandler;
 import cn.nukkit.event.EventPriority;
 import cn.nukkit.event.Listener;
 import cn.nukkit.event.block.BlockBreakEvent;
 import cn.nukkit.event.player.PlayerFormRespondedEvent;
 import cn.nukkit.event.player.PlayerInteractEvent;
-import cn.nukkit.event.player.PlayerQuitEvent;
 import cn.nukkit.form.response.FormResponseSimple;
 import cn.nukkit.form.window.FormWindowSimple;
-import cn.nukkit.item.Item;
-import cn.nukkit.item.ItemBookEnchanted;
-import cn.nukkit.item.ItemEmerald;
-import cn.nukkit.item.ItemTotem;
-import cn.nukkit.scheduler.Task;
+import cn.nukkit.item.*;
 import cn.nukkit.utils.Config;
+import cn.nukkit.utils.ConfigSection;
 import cn.nukkit.utils.TextFormat;
+import gameapi.arena.Arena;
 import gameapi.effect.Effect;
 import gameapi.event.*;
 import gameapi.room.Room;
+import gameapi.room.RoomRule;
 import gameapi.room.RoomStatus;
-import gameapi.scoreboard.UIScoreboard;
-import gameapi.skill.CustomSkills;
+import gameapi.scoreboard.ScoreboardAPI;
 import gameapi.sound.Sound;
 import gameapi.utils.GameRecord;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+
+import static testgame.MainClass.path;
+import static testgame.MainClass.roomListHashMap;
 
 public class Event implements Listener {
     public static HashMap<Room, List<Player>> roomFinishPlayers = new HashMap<>();
@@ -46,6 +44,9 @@ public class Event implements Listener {
         if(room == null){ return; }
         if(item instanceof ItemBookEnchanted && item.getCustomName().equals("§l§c退出房间")){
             room.removePlayer(player,true);
+            if(room.getPlayers().size() == 0){
+                roomListHashMap.remove(room);
+            }
             player.sendMessage("§l§c您已退出房间！");
             return;
         }
@@ -56,45 +57,20 @@ public class Event implements Listener {
         }
 
         if(item instanceof ItemTotem && item.getCustomName().equals("§l§e选择职业")){
-            try {
-                Window.showPlayerSkillSelectWindow(player);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+            Window.showPlayerSkillSelectWindow(player);
             return;
         }
 
-        if(item.hasCompoundTag()){
-            if(item.getNamedTag().contains("ItemType")){
-                if(item.getNamedTag().getString("ItemType").equals("skillItem")){
-                    Player p = event.getPlayer();
-                    p.getInventory().setItem(2, Item.get(Block.AIR));
-                    Effect effect = new Effect(cn.nukkit.potion.Effect.SPEED,2,2);
-                    CustomSkills skill1 = new CustomSkills("加速","Speed Up",Item.get(Item.FEATHER), effect, true, 100);
-                    p.sendMessage(TextFormat.GOLD+"您使用了技能:"+skill1.getCustomName());
-                    cn.nukkit.potion.Effect effect1 = Effect.parseEffect(event.getPlayer(),effect);
-                    effect1.setVisible(true);
-                    p.addEffect(Effect.parseEffect(event.getPlayer(),effect));
-                    Server.getInstance().getScheduler().scheduleDelayedTask(new Task() {
-                        @Override
-                        public void onRun(int i) {
-                            if(Room.getRoom(p) != null && Room.getRoom(p).getRoomStatus() == RoomStatus.ROOM_STATUS_GameStart) {
-                                skill1.giveSkillItem(event.getPlayer(), false);
-                                //p.removeEffect(skill1.getEffect().getId());
-                                p.sendMessage(TextFormat.GREEN + "技能冷却结束！");
-                            }
-                            this.onCancel();
-                        }
-                    },skill1.getCoolDownTick());
-                }
-            }
+        if(item instanceof ItemPaper && item.getCustomName().equals("§l§e选择地图")){
+            Window.showVoteForMap(player);
+            return;
         }
 
         if(event.getBlock().getId() == Block.EMERALD_BLOCK && room.getRoomStatus() == RoomStatus.ROOM_STATUS_GameStart) {
             if (!roomFinishPlayers.get(room).contains(event.getPlayer())) {
                 roomFinishPlayers.get(room).add(event.getPlayer());
                 int lastSec = room.getGameTime() - room.getTime();
-                UIScoreboard.drawScoreBoardEntry(event.getPlayer(),MainClass.getScoreboardSetting("scoreboard_objective_name"),MainClass.getScoreboardSetting("scoreboard_display_name"),MainClass.getScoreboardSetting("rank_format").replace("%rank%", String.valueOf(roomFinishPlayers.get(room).indexOf(event.getPlayer())+1)),MainClass.getScoreboardSetting("time_format").replace("%time%",UIScoreboard.secToTime(lastSec)));
+                ScoreboardAPI.drawScoreBoardEntry(event.getPlayer(),MainClass.getScoreboardSetting("scoreboard_objective_name"),MainClass.getScoreboardSetting("scoreboard_display_name"),MainClass.getScoreboardSetting("rank_format").replace("%rank%", String.valueOf(roomFinishPlayers.get(room).indexOf(event.getPlayer())+1)),MainClass.getScoreboardSetting("time_format").replace("%time%",ScoreboardAPI.secToTime(lastSec)));
                 if (room.getTime() < room.getGameTime() - 15) {
                     room.setTime(room.getGameTime() - 15);
                 }
@@ -146,20 +122,8 @@ public class Event implements Listener {
         List<Effect> effectList = MainClass.getBlockAddonsInit(event.getBlock());
         if(effectList != null){
             for(Effect effect:effectList){
-                cn.nukkit.potion.Effect effect1 = Effect.parseEffect(event.getPlayer(),effect);
-                effect1.setVisible(true);
-                event.getPlayer().addEffect(Effect.parseEffect(event.getPlayer(),effect));
-                event.getPlayer().sendMessage("获得"+effect1.getName()+"*"+effect1.getAmplifier()+"*"+effect1.getDuration()/20+"秒");
-                /*
-                Server.getInstance().getScheduler().scheduleDelayedTask(new Task() {
-                    @Override
-                    public void onRun(int i) {
-                        event.getPlayer().removeEffect(effect1.getId());
-                        this.onCancel();
-                    }
-                },effect1.getDuration());
-                
-                 */
+                effect.giveEffect(event.getPlayer());
+                event.getPlayer().sendMessage("获得"+ cn.nukkit.potion.Effect.getEffect(effect.getId()).getName() +"*"+effect.getAmplifier()+"*"+effect.getDuration()/20+"秒");
             }
         }
         if(event.getBlock().getId() == Block.RED_MUSHROOM_BLOCK){
@@ -182,49 +146,28 @@ public class Event implements Listener {
             pickaxe.setCount(1);
             pickaxe.setCustomName("英雄之镐");
             p.getInventory().setItem(0, pickaxe);
-            Effect effect = new Effect(cn.nukkit.potion.Effect.SPEED,2,5);
-            CustomSkills skill1 = new CustomSkills("加速","Speed Up",Item.get(Item.FEATHER), effect, true, 100);
-            skill1.giveSkillItem(p);
+            MainClass.skills.get((String) room.getPlayerProperties(p, "skill1")).giveSkillItem(p, true);
             Sound.playResourcePackOggMusic(p, "game_begin");
         }
     }
 
     @EventHandler
-    public void ceremony(RoomCeremonyEvent event){
+    public void ceremony(RoomGameEndEvent event){
         if(!event.getRoom().getGameName().equals("DRecknessHero")){ return;}
         List<Player> players = roomFinishPlayers.get(event.getRoom());
-        Config config = new Config(MainClass.path+"/rooms.yml",Config.YAML);
-        List<String> winnerCmds = config.getList(event.getRoom().getRoomName()+".WinCommands",new ArrayList());
-        List<String> failCmds = config.getList(event.getRoom().getRoomName()+".FailComands",new ArrayList());
         for(Player p:event.getRoom().getPlayers()){
             if(players.contains(p)){
-                GameRecord.addGameRecord("DRecknessHero",p.getName(), "winning",1);
-                p.sendMessage("§l§e您已成功完成比赛 §l§a"+GameRecord.getGameRecord("DRecknessHero",p.getName(),"winning")+" §l§e次");
-                for(String cmd:winnerCmds){
-                    Server.getInstance().dispatchCommand(Server.getInstance().getConsoleSender(),cmd.replace("{player}",p.getName()));
-                }
-            }else{
-                GameRecord.addGameRecord("DRecknessHero",p.getName(), "failed",1);
-                p.sendMessage("§l§e您未完成比赛 §l§c"+GameRecord.getGameRecord("DRecknessHero",p.getName(),"failed")+" §l§e次");
-                for(String cmd:failCmds){
-                    Server.getInstance().dispatchCommand(Server.getInstance().getConsoleSender(),cmd.replace("{player}",p.getName()));
-                }
-            }
-        }
-    }
-
-    @EventHandler
-    public void gameEnd(RoomGameEndEvent event){
-        if(!event.getRoom().getGameName().equals("DRecknessHero")){ return;}
-        for(Player p:event.getRoom().getPlayers()){
-            if(roomFinishPlayers.get(event.getRoom()).contains(p)){
-                p.sendTitle("比赛结束","恭喜您获得了第"+(roomFinishPlayers.get(event.getRoom()).indexOf(p)+1)+"名",10,20,10);
-                //UIScoreboard.drawScoreBoardEntry(p,MainClass.getScoreboardSetting("scoreboard_objective_name"),MainClass.getScoreboardSetting("scoreboard_display_name"),MainClass.getScoreboardSetting("rank_format").replace("%rank%", String.valueOf(roomFinishPlayers.get(event.getRoom()).indexOf(p)+1)));
+                GameRecord.addGameRecord("DRecknessHero",p.getName(), "win",1);
+                p.sendMessage("§l§e您已成功完成比赛 §l§a"+GameRecord.getGameRecord("DRecknessHero",p.getName(),"win")+" §l§e次");
+                p.sendTitle("比赛结束","恭喜您获得了第"+(players.indexOf(p)+1)+"名",10,20,10);
                 Sound.playResourcePackOggMusic(p,"winning");
+                event.getRoom().executeWinCommands(p);
             }else{
+                GameRecord.addGameRecord("DRecknessHero",p.getName(), "lose",1);
+                p.sendMessage("§l§e您未完成比赛 §l§c"+GameRecord.getGameRecord("DRecknessHero",p.getName(),"lose")+" §l§e次");
                 p.sendTitle("比赛结束","您未完成比赛！",10,20,10);
-                //UIScoreboard.drawScoreBoardEntry(p,MainClass.getScoreboardSetting("scoreboard_objective_name"),MainClass.getScoreboardSetting("scoreboard_display_name"),MainClass.getScoreboardSetting("failed_format"));
                 Sound.playResourcePackOggMusic(p, "game_over");
+                event.getRoom().executeLoseCommands(p);
             }
         }
     }
@@ -232,7 +175,12 @@ public class Event implements Listener {
     @EventHandler
     public void end(RoomEndEvent event){
         if(!event.getRoom().getGameName().equals("DRecknessHero")){ return;}
-        roomFinishPlayers.put(event.getRoom(),new ArrayList<>());
+        if(event.getRoom().getTemporary()){
+            roomFinishPlayers.remove(event.getRoom());
+            MainClass.roomListHashMap.remove(event.getRoom());
+        }else {
+            roomFinishPlayers.put(event.getRoom(), new ArrayList<>());
+        }
     }
 
     @EventHandler
@@ -241,22 +189,11 @@ public class Event implements Listener {
         if(!room.getGameName().equals("DRecknessHero")){ return;}
         int lastSec = room.getGameTime() - room.getTime();
         for(Player p:room.getPlayers()){
-            p.getFoodData().setLevel(20);
-            if(lastSec == room.getGameTime()){
-                if(roomFinishPlayers.get(event.getRoom()).contains(p)){
-                    p.sendTitle("比赛结束","恭喜您获得了第"+(roomFinishPlayers.get(event.getRoom()).indexOf(p)+1)+"名",10,20,10);
-                    UIScoreboard.drawScoreBoardEntry(p,MainClass.getScoreboardSetting("scoreboard_objective_name"),MainClass.getScoreboardSetting("scoreboard_display_name"),MainClass.getScoreboardSetting("rank_format").replace("%rank%", String.valueOf(roomFinishPlayers.get(event.getRoom()).indexOf(p)+1)));
-                    Sound.playResourcePackOggMusic(p,"winning");
-                }else{
-                    p.sendTitle("比赛结束","您未完成比赛！",10,20,10);
-                    UIScoreboard.drawScoreBoardEntry(p,MainClass.getScoreboardSetting("scoreboard_objective_name"),MainClass.getScoreboardSetting("scoreboard_display_name"),MainClass.getScoreboardSetting("failed_format"));
-                    Sound.playResourcePackOggMusic(p, "game_over");
-                }
-            }else {
+            if(lastSec < room.getGameTime()){
                 if (!roomFinishPlayers.get(room).contains(p)) {
-                    UIScoreboard.drawTimeBoardEntry(p, MainClass.getScoreboardSetting("scoreboard_objective_name"), MainClass.getScoreboardSetting("scoreboard_display_name"), MainClass.getScoreboardSetting("time_format").replace("%time%", UIScoreboard.secToTime(lastSec)));
+                    ScoreboardAPI.drawScoreBoardEntry(p, MainClass.getScoreboardSetting("scoreboard_objective_name"), MainClass.getScoreboardSetting("scoreboard_display_name"), MainClass.getScoreboardSetting("time_format").replace("%time%", ScoreboardAPI.secToTime(lastSec)));
                 } else {
-                    UIScoreboard.drawScoreBoardEntry(p, MainClass.getScoreboardSetting("scoreboard_objective_name"), MainClass.getScoreboardSetting("scoreboard_display_name"), MainClass.getScoreboardSetting("rank_format").replace("%rank%", String.valueOf(roomFinishPlayers.get(room).indexOf(p) + 1)), MainClass.getScoreboardSetting("time_format").replace("%time%", UIScoreboard.secToTime(lastSec)));
+                    ScoreboardAPI.drawScoreBoardEntry(p, MainClass.getScoreboardSetting("scoreboard_objective_name"), MainClass.getScoreboardSetting("scoreboard_display_name"), MainClass.getScoreboardSetting("rank_format").replace("%rank%", String.valueOf(roomFinishPlayers.get(room).indexOf(p) + 1)), MainClass.getScoreboardSetting("time_format").replace("%time%", ScoreboardAPI.secToTime(lastSec)));
                 }
             }
         }
@@ -264,26 +201,105 @@ public class Event implements Listener {
 
     @EventHandler
     public void GuiRespondedEvent(PlayerFormRespondedEvent event){
-        if(event.getResponse() == null){ return; }
+        if(event.getResponse() == null){
+            playerFormWindowSimpleHashMap.remove(event.getPlayer());
+            return;
+        }
         if(Event.playerFormWindowSimpleHashMap.containsKey(event.getPlayer())){
             if(event.getWindow() != Event.playerFormWindowSimpleHashMap.get(event.getPlayer())){ return; }
             if(!(event.getWindow() instanceof FormWindowSimple)){ return; }
+            playerFormWindowSimpleHashMap.remove(event.getPlayer());
             String title = ((FormWindowSimple)event.getWindow()).getTitle();
             FormResponseSimple formResponseSimple = (FormResponseSimple) event.getResponse();
             Player player = event.getPlayer();
-            switch (title){
+            switch (title) {
                 case "§l§e选择房间":
                     Room room = Room.getRoom("DRecknessHero", formResponseSimple.getClickedButton().getText());
                     MainClass.processJoin(room, player);
                     break;
                 case "§l§e选择技能":
-                    Room room1 = Room.getRoom(player);
-                    if(room1 != null){
-                        room1.setPlayerProperties(player,"skill1", formResponseSimple.getClickedButtonId());
+                    Room room1 = Room.getRoom("DRecknessHero", player);
+                    if (room1 != null) {
+                        player.sendMessage("您已选择技能: "+formResponseSimple.getClickedButton().getText());
+                        room1.setPlayerProperties(player, "skill1", formResponseSimple.getClickedButton().getText());
+                    }
+                    break;
+                case "§l§e选择地图":
+                    Room room2 = Room.getRoom("DRecknessHero", player);
+                    if (room2 != null) {
+                        Map<String, Integer> map = (Map<String, Integer>) room2.getRoomProperties("mapRanks");
+                        map.put(formResponseSimple.getClickedButton().getText(), map.getOrDefault(formResponseSimple.getClickedButton().getText(), 0) + 1);
+                        room2.setRoomProperties("mapRanks", map);
+                        player.sendMessage("您为地图【" + formResponseSimple.getClickedButton().getText() + "】投上一票！");
+                        player.getInventory().setItem(1, new BlockAir().toItem());
                     }
                     break;
             }
         }
-        playerFormWindowSimpleHashMap.remove(event.getPlayer());
+    }
+
+    @EventHandler
+    public void RoomPreStartListener(RoomPreStartListener event){
+        Room room = event.getRoom();
+        if(!room.getGameName().equals("DRecknessHero")){ return;}
+        if(room.getWaitTime() - room.getTime() == 10){
+            if(room.getTemporary()) {
+                Map<String, Integer> map = (Map<String, Integer>) room.getRoomProperties("mapRanks");
+                List<Map.Entry<String, Integer>> list = new ArrayList<>(map.entrySet());
+                list.sort((o1, o2) -> o2.getValue().compareTo(o1.getValue()));
+                if (list.size() > 0) {
+                    Map.Entry<String, Integer> first = list.get(0);
+                    if(loadRoomMap(room, first.getKey())) {
+                        room.getPlayers().forEach(player -> player.sendMessage("已选择地图： "+ first.getKey()+"【"+first.getValue()+"票】"));
+                    }else{
+                        room.setRoomStatus(RoomStatus.ROOM_STATUS_GameEnd);
+                    }
+                }else{
+                    room.setRoomStatus(RoomStatus.ROOM_STATUS_GameEnd);
+                }
+            }
+        }
+    }
+
+    public boolean loadRoomMap(Room room, String map){
+        Config config = new Config(path+"/maps.yml", Config.YAML);
+        if (config.exists(map + ".LoadWorld")) {
+            String backup = config.getString(map + ".LoadWorld", "null");
+            room.setRoomLevelBackup(backup);
+            room.setRoomName(backup);
+            if (Server.getInstance().getLevelByName(config.getString(map)) == null) {
+                String newName = room.getGameName() + "_" + backup + "_" + UUID.randomUUID();
+                if (Arena.copyWorldAndLoad(newName, backup)) {
+                    if (Server.getInstance().isLevelLoaded(newName)) {
+                        Server.getInstance().getLevelByName(newName).setAutoSave(false);
+                        if(config.exists(map+".WaitSpawn")){
+                            room.setWaitSpawn(config.getString(map+".WaitSpawn").replace(backup, newName));
+                        }else{
+                            return false;
+                        }
+                        if(config.exists(map+".StartSpawn")){
+                            room.addStartSpawn(config.getString(map+".StartSpawn").replace(backup, newName));
+                        }else{
+                            return false;
+                        }
+                        if(config.exists(map+".WaitTime")){
+                            room.setWaitTime(config.getInt(map+".WaitTime"));
+                        }else{
+                            return false;
+                        }
+                        if(config.exists(map+".GameTime")){
+                            room.setGameTime(config.getInt(map+".GameTime"));
+                        }else{
+                            return false;
+                        }
+                        room.setEndSpawn(Server.getInstance().getDefaultLevel().getSpawnLocation().getLocation());
+                        room.setWinConsoleCommands(new ArrayList<>(config.getStringList(map+".WinCommands")));
+                        room.setLoseConsoleCommands(new ArrayList<>(config.getStringList(map+".FailCommands")));
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 }

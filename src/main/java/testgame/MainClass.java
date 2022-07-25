@@ -4,30 +4,31 @@ import cn.nukkit.Player;
 import cn.nukkit.Server;
 import cn.nukkit.block.Block;
 import cn.nukkit.event.Listener;
-import cn.nukkit.item.Item;
-import cn.nukkit.item.ItemBookEnchanted;
-import cn.nukkit.item.ItemEmerald;
-import cn.nukkit.item.ItemTotem;
-import cn.nukkit.level.Position;
+import cn.nukkit.item.*;
 import cn.nukkit.plugin.PluginBase;
 import cn.nukkit.utils.Config;
+import cn.nukkit.utils.ConfigSection;
+import gameapi.GameAPI;
 import gameapi.arena.Arena;
 import gameapi.effect.Effect;
 import gameapi.room.Room;
 import gameapi.room.RoomRule;
 import gameapi.room.RoomStatus;
+import gameapi.scripts.CustomSkill;
+import gameapi.utils.FileUtil;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.io.File;
+import java.util.*;
 
 public class MainClass extends PluginBase implements Listener {
 
     public static List<Room> roomListHashMap = new ArrayList<>();
+    public static List<String> maps = new ArrayList<>();
     public static HashMap<String, List<Effect>> effectHashMap = new HashMap<>();
+
+    public static HashMap<String, CustomSkill> skills = new HashMap<>();
     public static String path = null;
-    public static Map<String, Object> scoreboardCfg = new HashMap<String, Object>();
+    public static Map<String, Object> scoreboardCfg = new HashMap<>();
 
     @Override
     public void onLoad() {
@@ -36,6 +37,10 @@ public class MainClass extends PluginBase implements Listener {
 
     @Override
     public void onDisable() {
+        roomListHashMap.clear();
+        maps.clear();
+        effectHashMap.clear();
+        scoreboardCfg.clear();
         super.onDisable();
     }
 
@@ -49,11 +54,32 @@ public class MainClass extends PluginBase implements Listener {
         path = getDataFolder().getPath();
         this.saveResource("blockaddons.yml",false);
         this.saveResource("rooms.yml",false);
+        this.saveResource("maps.yml",false);
+        this.saveResource("skills.yml",false);
         this.saveResource("scoreboard.yml",false);
         this.loadRooms();
         this.loadBlockAddons();
         this.loadScoreboardSetting();
-        super.onEnable();
+        this.saveResource("skills/DRecknessHero_SpeedUp.json", false);
+        this.saveResource("skills/DRecknessHero_JumpBoost.json", false);
+        this.saveResource("skills/DRecknessHero_Builder.json", false);
+        Config config = new Config(path+"/skills.yml");
+        for(String fileName: new ArrayList<>(config.getStringList("scripts"))) {
+            File file = new File(Server.getInstance().getDataPath() + "/plugins/GameAPI/scripts/skills/" + fileName+".json");
+            if(!file.exists()){
+                if(FileUtil.copy(path+"/skills/"+fileName+".json", file)){
+                    CustomSkill skill = new CustomSkill(file);
+                    skill.loadSkill();
+                    skills.put(skill.getCustomName(), skill);
+                }
+            }else{
+                CustomSkill skill = new CustomSkill(file);
+                skill.loadSkill();
+                skills.put(skill.getCustomName(), skill);
+            }
+        }
+        Config mapsCfg = new Config(path+"/maps.yml");
+        maps.addAll(mapsCfg.getKeys(false));
     }
 
     public void loadScoreboardSetting(){
@@ -76,19 +102,19 @@ public class MainClass extends PluginBase implements Listener {
         effectHashMap = new HashMap<>();
         for(String string: config.getKeys(false)){
             this.getLogger().info("正在加载方块"+string+"的拓展数据");
-            String[] idSplit = string.split(":");
             for(Room room:roomListHashMap){
                 RoomRule roomRule = room.getRoomRule();
-                roomRule.canBreakBlocks.add(Integer.valueOf(idSplit[0]));
+                roomRule.canBreakBlocks.add(string);
                 room.setRoomRule(roomRule);
-                this.getLogger().info("方块"+idSplit[0]+"已被允许在游戏中破坏");
+                this.getLogger().info("方块"+string+"已被允许在游戏中破坏");
             }
             List<Effect> effectList = new ArrayList<>();
             for(String effectStr: config.getStringList(string+".effects")) {
                 String[] effectSplit = effectStr.split(":");
                 if(effectSplit.length == 3) {
                    gameapi.effect.Effect effect = new gameapi.effect.Effect(Integer.parseInt(effectSplit[0]),Integer.parseInt(effectSplit[1]),Integer.parseInt(effectSplit[2]));
-                    effectList.add(effect);
+                   this.getLogger().info(effect.toString());
+                   effectList.add(effect);
                 }
             }
             effectHashMap.put(string,effectList);
@@ -97,128 +123,119 @@ public class MainClass extends PluginBase implements Listener {
     }
 
     public void loadRooms(){
-        Config config = new Config(this.getDataFolder()+"/rooms.yml",Config.YAML);
-        if(config.getKeys() != null){
-            for(String s:config.getKeys(false)){
-                RoomRule roomRule = new RoomRule(0);
-                roomRule.allowBreakBlock = false;
-                roomRule.allowPlaceBlock = false;
-                roomRule.allowFallDamage = false;
-                roomRule.allowDamagePlayer = false;
-                roomRule.allowHungerDamage = false;
-                roomRule.allowFoodLevelChange = false;
-                roomRule.canBreakBlocks.add(100);
-                roomRule.canBreakBlocks.add(152);
-                roomRule.canPlaceBlocks.add(152);
-                Room room = new Room("DRecknessHero", roomRule, "",1);
-                if (config.exists(s + ".LoadWorld")) {
-                    String backup = config.getString(s + ".LoadWorld");
-                    room.setRoomLevelBackup(backup);
-                    room.setStartLevel(s);
-                    if (Server.getInstance().getLevelByName(config.getString(s)) == null) {
-                        if(Arena.copyWorldAndLoad(s, backup)){
-                            if (Server.getInstance().isLevelLoaded(s)) {
-                                Server.getInstance().getLevelByName(s).setAutoSave(false);
-                            } else {
-                                this.getLogger().info("房间【" + s + "】检测已经加载！");
-                            }
+        Config config = new Config(path+"/rooms.yml",Config.YAML);
+        for(String s:config.getKeys(false)) {
+            this.loadRoom(config.getString(s+".map", ""), s,config.getInt(s+".min", 1),config.getInt(s+".max", 16));
+        }
+    }
+
+    public void loadRoom(String map, String roomName, Integer min, Integer max){
+        RoomRule roomRule = new RoomRule(0);
+        Config config = new Config(path+"/maps.yml", Config.YAML);
+        roomRule.allowBreakBlock = false;
+        roomRule.allowPlaceBlock = false;
+        roomRule.allowFallDamage = false;
+        roomRule.allowDamagePlayer = false;
+        roomRule.allowHungerDamage = false;
+        roomRule.allowFoodLevelChange = false;
+        roomRule.noStartWalk = false;
+        roomRule.canBreakBlocks.add("100:14");
+        roomRule.canPlaceBlocks.add("152:0");
+        roomRule.canBreakBlocks.addAll(effectHashMap.keySet());
+        Room room = new Room("DRecknessHero", roomRule, "", 1);
+        room.setRoomName(roomName);
+        if (config.exists(map + ".LoadWorld")) {
+            String backup = config.getString(map + ".LoadWorld");
+            room.setRoomLevelBackup(backup);
+            if (Server.getInstance().getLevelByName(config.getString(map)) == null) {
+                String newName = room.getGameName() + "_" + backup + "_" + UUID.randomUUID();
+                if (Arena.copyWorldAndLoad(newName, backup)) {
+                    if (Server.getInstance().isLevelLoaded(newName)) {
+                        Server.getInstance().getLevelByName(newName).setAutoSave(false);
+                        this.getLogger().info("房间【" + backup + "】加载！");
+
+                        if(config.exists(map+".WaitSpawn")){
+                            room.setWaitSpawn(config.getString(map+".WaitSpawn").replace(backup, newName));
+                        }else{
+                            this.getLogger().info("房间【"+map+"】加载失败,请检查等待点配置！");
+                            return;
                         }
+
+                        if(config.exists(map+".StartSpawn")){
+                            room.addStartSpawn(config.getString(map+".StartSpawn").replace(backup, newName));
+                        }else{
+                            this.getLogger().info("房间【"+map+"】加载失败,请检查出生地配置！");
+                            return;
+                        }
+
+                        if(config.exists(map+".WaitTime")){
+                            room.setWaitTime(config.getInt(map+".WaitTime"));
+                        }else{
+                            this.getLogger().info("房间【"+map+"】加载失败,请检查等待时间配置！");
+                            return;
+                        }
+
+                        if(config.exists(map+".GameTime")){
+                            room.setGameTime(config.getInt(map+".GameTime"));
+                        }else{
+                            this.getLogger().info("房间【"+map+"】加载失败,请检查游戏时间配置！");
+                            return;
+                        }
+                        room.setMinPlayer(min);
+                        room.setMinPlayer(max);
+                        room.setEndSpawn(Server.getInstance().getDefaultLevel().getSpawnLocation().getLocation());
+                        Event.roomFinishPlayers.put(room,new ArrayList<>());
+                        Room.loadRoom(room);
+                        roomListHashMap.add(room);
+                        room.setRoomStatus(RoomStatus.ROOM_STATUS_WAIT);
+                        room.setWinConsoleCommands(new ArrayList<>(config.getStringList(map+".WinCommands")));
+                        room.setLoseConsoleCommands(new ArrayList<>(config.getStringList(map+".FailCommands")));
+                        this.getLogger().info("房间【"+map+"】加载成功！");
                     } else {
-                        this.getLogger().info("房间【" + s + "】加载失败,请检查地图是否存在！");
-                        continue;
+                        this.getLogger().info("房间【" + backup + "】地图加载失败！");
                     }
-                }else{
-                    this.getLogger().info("房间【" + s + "】加载失败,请检查地图是否存在！");
-                    continue;
+                } else {
+                    this.getLogger().info("房间【" + map + "】地图复制失败！");
                 }
-
-                if(config.exists(s+".WaitSpawn")){
-                    String[] strings = config.getString(s+".WaitSpawn").split(":");
-                    if(strings.length != 3){ this.getLogger().info("房间【"+s+"】加载失败,请检查出生地配置！");return;}
-                    room.setWaitSpawn(new Position(Double.parseDouble(strings[0]),Double.parseDouble(strings[1]),Double.parseDouble(strings[2]), Server.getInstance().getLevelByName(s)).getLocation());
-                }else{
-                    this.getLogger().info("房间【"+s+"】加载失败,请检查等待点配置！");
-                    continue;
-                }
-
-                if(config.exists(s+".StartSpawn")){
-                    String[] strings = config.getString(s+".StartSpawn").split(":");
-                    if(strings.length != 3){ this.getLogger().info("房间【"+s+"】加载失败,请检查出生地配置！");return;}
-                    room.setStartSpawn(new Position(Double.parseDouble(strings[0]),Double.parseDouble(strings[1]),Double.parseDouble(strings[2]), Server.getInstance().getLevelByName(s)).getLocation());
-                }else{
-                    this.getLogger().info("房间【"+s+"】加载失败,请检查出生地配置！");
-                    continue;
-                }
-
-                if(config.exists(s+".WaitTime")){
-                    room.setWaitTime(config.getInt(s+".WaitTime"));
-                }else{
-                    this.getLogger().info("房间【"+s+"】加载失败,请检查等待时间配置！");
-                    continue;
-                }
-
-                if(config.exists(s+".GameTime")){
-                    room.setGameTime(config.getInt(s+".GameTime"));
-                }else{
-                    this.getLogger().info("房间【"+s+"】加载失败,请检查游戏时间配置！");
-                    continue;
-                }
-
-                if(config.exists(s+".MinPlayer")){
-                    room.setMinPlayer(config.getInt(s+".MinPlayer",1));
-                }else{
-                    this.getLogger().info("房间【"+s+"】加载失败,请检查最小玩家人数配置！");
-                    continue;
-                }
-
-                if(config.exists(s+".MaxPlayer")){
-                    room.setMinPlayer(config.getInt(s+".MaxPlayer",1));
-                }else{
-                    this.getLogger().info("房间【"+s+"】加载失败,请检查最大玩家人数配置！");
-                    continue;
-                }
-                Event.roomFinishPlayers.put(room,new ArrayList<>());
-                Room.loadRoom(room);
-                roomListHashMap.add(room);
-                room.setRoomStatus(RoomStatus.ROOM_STATUS_WAIT);
-                room.setRoomName(s);
-                this.getLogger().info("房间【"+s+"】加载成功！");
+            } else {
+                this.getLogger().info("房间【" + map + "】加载失败,请检查地图是否存在！");
             }
+        } else {
+            this.getLogger().info("房间【" + map + "】加载失败,请检查地图是否存在！");
         }
     }
 
     public static void processJoin(Room room, Player p){
         if(room != null){
-            if(Server.getInstance().isLevelLoaded(room.getStartLevel())) {
-                RoomStatus rs = room.getRoomStatus();
-                if(rs == RoomStatus.ROOM_STATUS_WAIT || rs == RoomStatus.ROOM_STATUS_PreStart) {
-                    if(room.addPlayer(p)) {
-                        p.getInventory().clearAll();
-                        p.getUIInventory().clearAll();
-                        p.getFoodData().setLevel(p.getFoodData().getMaxLevel());
-                        p.teleport(Position.fromObject(room.getWaitSpawn().getLocation(), Server.getInstance().getLevelByName(room.getStartLevel())));
-                        p.setGamemode(2);
-                        Item addItem1 = new ItemBookEnchanted();
-                        addItem1.setCustomName("§l§c退出房间");
-                        p.getInventory().setItem(0,addItem1);
+            RoomStatus rs = room.getRoomStatus();
+            if(rs == RoomStatus.ROOM_STATUS_WAIT || rs == RoomStatus.ROOM_STATUS_PreStart) {
+                if(room.addPlayer(p)) {
+                    p.getInventory().clearAll();
+                    p.getUIInventory().clearAll();
+                    p.setGamemode(2);
+                    Item addItem1 = new ItemBookEnchanted();
+                    addItem1.setCustomName("§l§c退出房间");
+                    p.getInventory().setItem(0,addItem1);
 
-                        Item addItem2 = new ItemEmerald();
-                        addItem2.setCustomName("§l§a历史战绩");
-                        p.getInventory().setItem(7,addItem2);
+                    Item addItem2 = new ItemEmerald();
+                    addItem2.setCustomName("§l§a历史战绩");
+                    p.getInventory().setItem(7,addItem2);
 
-                        Item addItem3 = new ItemTotem(0);
-                        addItem3.setCustomName("§l§e选择职业");
-                        p.getInventory().setItem(8,addItem3);
+                    Item addItem3 = new ItemTotem(0);
+                    addItem3.setCustomName("§l§e选择职业");
+                    p.getInventory().setItem(8,addItem3);
 
-                        room.setPlayerProperties(p, "skill1", 0);
-                    }else{
-                        p.sendMessage("房间人数已满！");
+                    if(room.getTemporary()) {
+                        Item addItem4 = new ItemPaper(0);
+                        addItem4.setCustomName("§l§e选择地图");
+                        p.getInventory().setItem(1, addItem4);
                     }
+                    room.setPlayerProperties(p, "skill1", "暴走超人");
                 }else{
-                    p.sendMessage("游戏已经开始！");
+                    p.sendMessage("房间人数已满！");
                 }
             }else{
-                p.sendMessage("地图未加载完毕！");
+                p.sendMessage("游戏已经开始！");
             }
         }else{
             p.sendMessage("该房间不存在！");

@@ -1,7 +1,7 @@
 <component name="libraryTable">
   <library name="GameAPI">
     <CLASSES>
-      <root url="jar://$PROJECT_DIR$/../../Server/TEST/plugins/GameAPI.jar!/" />
+      <root url="jar://$PROJECT_DIR$/../../Server/DevelopmentPluginBase/GameAPI.jar!/" />
     </CLASSES>
     <JAVADOC />
     <SOURCES />
